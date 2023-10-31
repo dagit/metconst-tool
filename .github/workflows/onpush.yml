@@ -86,10 +86,10 @@ jobs:
           #  target: metconst-tool--aarch64.macos
           #  artifact-path: ./target/release/metconst-tool.zip
           #  is-osx: 1
-          - os: ubuntu-latest
-            target: metconst-tool-x86_64.AppImage
-            artifact-path: metconst-tool.AppImage
-            is-linux: 1
+          #- os: ubuntu-latest
+          #  target: metconst-tool-x86_64.AppImage
+          #  artifact-path: metconst-tool.AppImage
+          #  is-linux: 1
           - os: windows-latest
             target: metconst-tool-x86_64.win
             artifact-path: ./target/release/metconst-tool.exe
@@ -147,10 +147,10 @@ jobs:
       - id: get_repository_name
         run: echo REPOSITORY_NAME=$(echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//") >> $GITHUB_OUTPUT
         shell: bash
-      - uses: actions/download-artifact@v3
-        with:
-          name: metconst-tool-x86_64.AppImage
-          path: metconst-tool-x86_64.AppImage/
+          #- uses: actions/download-artifact@v3
+          #  with:
+          #    name: metconst-tool-x86_64.AppImage
+          #    path: metconst-tool-x86_64.AppImage/
             #- uses: actions/download-artifact@v3
             #  with:
             #    name: metconst-tool-x86_64.macos
@@ -182,14 +182,14 @@ jobs:
           release_name: metconst-tool Release ${{ steps.tag_date.outputs.TAG_NAME }}
           draft: ${{ github.ref != 'refs/heads/master' }}
           prerelease: true
-      - uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./metconst-tool-x86_64.AppImage/metconst-tool-0.1.0-x86_64.AppImage
-          asset_name: metconst-tool-${{ steps.tag_date.outputs.TAG_NAME }}-x86_64-linux.AppImage
-          asset_content_type: application/octet-stream
+            #- uses: actions/upload-release-asset@v1
+            #  env:
+            #    GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+            #  with:
+            #    upload_url: ${{ steps.create_release.outputs.upload_url }}
+            #    asset_path: ./metconst-tool-x86_64.AppImage/metconst-tool-0.1.0-x86_64.AppImage
+            #    asset_name: metconst-tool-${{ steps.tag_date.outputs.TAG_NAME }}-x86_64-linux.AppImage
+            #    asset_content_type: application/octet-stream
             #- uses: actions/upload-release-asset@v1
             #  env:
             #    GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
