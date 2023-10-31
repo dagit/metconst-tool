@@ -89,7 +89,9 @@ fn patch_in_dir(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let dir_path = entry.path().parent().ok_or("bad path")?;
     let mut rom_file = PathBuf::new();
+    rom_file.push("patched");
     rom_file.push(dir_path);
+    fs::create_dir_all(&rom_file)?;
     rom_file.push(entry.file_name());
     let extension = base_rom.rsplit_once('.');
     rom_file.set_extension(extension.map(|(_, e)| e).unwrap());
