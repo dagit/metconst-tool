@@ -217,7 +217,7 @@ fn patch_in_dir(
 
     // Open the rom file and begin overwriting it
     writeln!(log, "Opening {:#?} to apply patch", &rom_file)?;
-    let mut rom = OpenOptions::new().write(true).append(true).open(rom_file)?;
+    let mut rom = OpenOptions::new().read(true).write(true).open(rom_file)?;
     writeln!(log, "Reading patch file {:#?}", &entry.path())?;
     let patch_contents = fs::read(entry.path())?;
     let patch = Patch::parse(&patch_contents)?;
