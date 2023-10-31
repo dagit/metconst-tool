@@ -1,11 +1,12 @@
 use clap::Parser;
+use indicatif::ProgressBar;
 use ips::Patch;
 use regex::Regex;
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use scraper::{Html, Selector};
 use std::fs::{self, create_dir_all, File, OpenOptions};
-use std::io::{BufWriter, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use walkdir::{DirEntry, WalkDir};
 
@@ -22,21 +23,40 @@ struct Args {
 enum RunMode {
     Download,
     Patch,
+    Unzip,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    println!("{:#?}", args);
     match args.mode {
         RunMode::Download => {
-            download().await?;
+            let log = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("download.txt")?;
+            let mut log_writer = BufWriter::new(&log);
+            download(&mut log_writer).await?;
+        }
+        RunMode::Unzip => {
+            let log = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("unzip.txt")?;
+            let mut log_writer = BufWriter::new(&log);
+            unzip_patches(&mut log_writer)?;
         }
         RunMode::Patch => {
             let log = OpenOptions::new()
+                .read(true)
+                .write(true)
                 .create(true)
-                .append(true)
+                .truncate(true)
                 .open("patch.txt")?;
             let mut log_writer = BufWriter::new(&log);
             if let Some(base_rom) = args.base_rom {
@@ -50,6 +70,81 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn unzip_patches(log: &mut dyn Write) -> Result<(), Box<dyn std::error::Error>> {
+    for entry in WalkDir::new("downloads")
+        .into_iter()
+        .filter_entry(is_zip_file)
+    {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("Skipping directory due to error: {}", e);
+                writeln!(log, "Skipping directory due to error: {}", e)?;
+                continue;
+            }
+        };
+        //println!("{:?}", entry.path());
+        if entry.file_type().is_file() {
+            let result = unzip_in_dir(entry, log);
+            match result {
+                Ok(()) => (),
+                Err(e) => {
+                    eprintln!("Hit an error but continuing: {}", e);
+                    writeln!(log, "Hit an error but continuing: {}", e)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn unzip_in_dir(entry: DirEntry, log: &mut dyn Write) -> Result<(), Box<dyn std::error::Error>> {
+    writeln!(log, "Zip file: {:?}", entry.path()).expect("cannot write to log");
+    let zip_file = File::open(entry.path())?;
+    let zip_reader = BufReader::new(&zip_file);
+
+    let mut zip = zip::ZipArchive::new(zip_reader)?;
+
+    if let Some(parent) = entry.path().parent() {
+        if let Some(zip_name) = entry.path().file_stem() {
+            let mut unpack_dir = PathBuf::new();
+            unpack_dir.push(parent);
+            unpack_dir.push(zip_name);
+
+            writeln!(log, "creating unpack directory: {:?}", unpack_dir)
+                .expect("failed to write log");
+            create_dir_all(&unpack_dir)?;
+
+            for i in 0..zip.len() {
+                let mut file = zip.by_index(i)?;
+                let mut full_file_name = PathBuf::new();
+                full_file_name.push(unpack_dir.clone());
+                full_file_name.push(file.name());
+
+                writeln!(log, "Creating: {:?}", full_file_name).expect("failed to write to log");
+                let output = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(full_file_name)?;
+                let mut output_writer = BufWriter::new(&output);
+                std::io::copy(&mut file, &mut output_writer)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_zip_file(entry: &DirEntry) -> bool {
+    entry.file_type().is_dir()
+        || entry
+            .file_name()
+            .to_str()
+            .map(|s| s.to_ascii_uppercase().ends_with(".ZIP"))
+            .unwrap_or(false)
 }
 
 fn is_ips_file(entry: &DirEntry) -> bool {
@@ -77,6 +172,7 @@ fn patch(base_rom: &str, log: &mut dyn Write) -> Result<(), Box<dyn std::error::
                 Ok(()) => (),
                 Err(e) => {
                     eprintln!("Hit an error but continuing: {}", e);
+                    writeln!(log, "Hit an error but continuing: {}", e)?;
                 }
             }
         }
@@ -137,7 +233,7 @@ fn patch_in_dir(
     Ok(())
 }
 
-async fn download() -> Result<(), Box<dyn std::error::Error>> {
+async fn download(log: &mut dyn Write) -> Result<(), Box<dyn std::error::Error>> {
     let retry_policy = ExponentialBackoff::builder().build_with_max_retries(10);
     let client = ClientBuilder::new(reqwest::ClientBuilder::new().user_agent("Foo").build()?)
         .with(RetryTransientMiddleware::new_with_policy(retry_policy))
@@ -147,6 +243,7 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: this will need to pull down mulitple pages once there are > 1000 hacks
     let allhacks = format!("{}hacks.php?sort=5&dir=asc&filters%5B%5D=SM&filters%5B%5D=Unknown&filters%5B%5D=Boss+Rush&filters%5B%5D=Exploration&filters%5B%5D=Challenge&filters%5B%5D=Spoof&filters%5B%5D=Speedrun%2FRace&filters%5B%5D=Incomplete&filters%5B%5D=Quick+Play&filters%5B%5D=Improvement&filters%5B%5D=Vanilla%2B&search=&num_per_page=1000", metconst);
 
+    println!("Fetching list of hacks...");
     let body = client.get(allhacks).send().await?.text().await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     let document = Html::parse_document(&body);
@@ -166,6 +263,12 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+    println!(
+        "There are a total of {} hacks available. This process may take several hours.",
+        hack_id.len()
+    );
+
+    let pb = ProgressBar::new(hack_id.len() as u64);
 
     for (idx, id) in hack_id.iter().enumerate() {
         let hack_url = format!("{}hack.php?id={}", metconst, id);
@@ -191,13 +294,20 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
                                     let dir_name = format!("downloads/{:04}-{}", idx, id);
                                     let full_file_name = format!("{}/{}", dir_name, file_name);
                                     if std::path::Path::new(&full_file_name).exists() {
-                                        println!("skipping {}, already downloaded", url);
+                                        //println!("skipping {}, already downloaded", url);
+                                        writeln!(log, "skipping {}, already downloaded", url)
+                                            .expect("failed to log");
                                     } else {
-                                        println!("url: {}", url);
-                                        println!("file_name: {}", file_name);
+                                        //println!("url: {}", url);
+                                        writeln!(log, "url: {}", url).expect("failed to log");
+                                        //println!("file_name: {}", file_name);
+                                        writeln!(log, "file_name: {}", file_name)
+                                            .expect("failed to log");
                                         let file_contents =
                                             client.get(url).send().await?.bytes().await?;
-                                        println!("dir_name: {}", dir_name);
+                                        //println!("dir_name: {}", dir_name);
+                                        writeln!(log, "dir_name: {}", dir_name)
+                                            .expect("failed to log");
                                         create_dir_all(&dir_name)?;
                                         let mut file = File::create(full_file_name)?;
                                         file.write_all(&file_contents)?;
@@ -211,7 +321,9 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        pb.inc(1);
     }
+    pb.finish_with_message("done");
 
     Ok(())
 }
