@@ -110,6 +110,7 @@ fn patch_in_dir(
     // Ensure that we can write to it
     writeln!(log, "Setting permissions on {:#?}", &rom_file)?;
     let mut perms = fs::metadata(&rom_file)?.permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
     perms.set_readonly(false);
     fs::set_permissions(&rom_file, perms)?;
 
