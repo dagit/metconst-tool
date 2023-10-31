@@ -116,9 +116,9 @@ jobs:
           export TARGET=aarch64-apple-darwin
           rustup target add $TARGET
       - run: cargo build --release
-      - run: cargo install --force cargo-strip
-      - run: cargo install --force cargo-bundle
-      - run: cargo strip -t release
+        #- run: cargo install --force cargo-strip
+        #- run: cargo install --force cargo-bundle
+        #- run: cargo strip -t release
       - name: macOS bundling
         if: ${{ matrix.is-osx }}
         run: |
