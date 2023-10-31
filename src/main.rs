@@ -185,17 +185,22 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(url) = element.value().attr("content") {
                             if let Some((_, url)) = url.rsplit_once('=') {
                                 if let Some((_, file_name)) = url.rsplit_once('/') {
-                                    println!("url: {}", url);
-                                    println!("file_name: {}", file_name);
-                                    let file_contents =
-                                        client.get(url).send().await?.bytes().await?;
                                     let dir_name = format!("downloads/{:04}-{}", idx, id);
-                                    println!("dir_name: {}", dir_name);
-                                    create_dir_all(&dir_name)?;
-                                    let file_name = format!("{}/{}", dir_name, file_name);
-                                    let mut file = File::create(file_name)?;
-                                    file.write_all(&file_contents)?;
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                                    let full_file_name = format!("{}/{}", dir_name, file_name);
+                                    if std::path::Path::new(&full_file_name).exists() {
+                                        println!("skipping {}, already downloaded", url);
+                                    } else {
+                                        println!("url: {}", url);
+                                        println!("file_name: {}", file_name);
+                                        let file_contents =
+                                            client.get(url).send().await?.bytes().await?;
+                                        println!("dir_name: {}", dir_name);
+                                        create_dir_all(&dir_name)?;
+                                        let mut file = File::create(full_file_name)?;
+                                        file.write_all(&file_contents)?;
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(5))
+                                            .await;
+                                    }
                                 }
                             }
                         }
