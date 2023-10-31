@@ -1,6 +1,8 @@
 use clap::Parser;
 use ips::Patch;
 use regex::Regex;
+use reqwest_middleware::ClientBuilder;
+use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use scraper::{Html, Selector};
 use std::fs::{self, create_dir_all, File, OpenOptions};
 use std::io::{BufWriter, Seek, SeekFrom, Write};
@@ -136,7 +138,10 @@ fn patch_in_dir(
 }
 
 async fn download() -> Result<(), Box<dyn std::error::Error>> {
-    let client = reqwest::ClientBuilder::new().user_agent("Foo").build()?;
+    let retry_policy = ExponentialBackoff::builder().build_with_max_retries(10);
+    let client = ClientBuilder::new(reqwest::ClientBuilder::new().user_agent("Foo").build()?)
+        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+        .build();
     let metconst = "https://metroidconstruction.com/";
 
     // TODO: this will need to pull down mulitple pages once there are > 1000 hacks
@@ -196,6 +201,7 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
     }
 
