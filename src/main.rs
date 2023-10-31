@@ -148,6 +148,7 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
     let allhacks = format!("{}hacks.php?sort=5&dir=asc&filters%5B%5D=SM&filters%5B%5D=Unknown&filters%5B%5D=Boss+Rush&filters%5B%5D=Exploration&filters%5B%5D=Challenge&filters%5B%5D=Spoof&filters%5B%5D=Speedrun%2FRace&filters%5B%5D=Incomplete&filters%5B%5D=Quick+Play&filters%5B%5D=Improvement&filters%5B%5D=Vanilla%2B&search=&num_per_page=1000", metconst);
 
     let body = client.get(allhacks).send().await?.text().await?;
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     let document = Html::parse_document(&body);
     let row_selector = Selector::parse("td")?;
     let ahref = Selector::parse("a")?;
@@ -169,6 +170,7 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
     for (idx, id) in hack_id.iter().enumerate() {
         let hack_url = format!("{}hack.php?id={}", metconst, id);
         let hack_page = client.get(hack_url).send().await?.text().await?;
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         let document = Html::parse_document(&hack_page);
         let download_link = format!(r"(^download\.php\?id={})", id);
         let re = Regex::new(&download_link)?;
@@ -179,6 +181,7 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
                 if re.is_match(href) {
                     let redirect_url = format!("{}{}", metconst, href);
                     let redirect_contents = client.get(redirect_url).send().await?.text().await?;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                     let meta = Selector::parse("meta")?;
                     let document = Html::parse_document(&redirect_contents);
                     for element in document.select(&meta) {
