@@ -123,6 +123,8 @@ fn unzip_in_dir(entry: DirEntry, log: &mut dyn Write) -> Result<(), Box<dyn std:
                 full_file_name.push(unpack_dir.clone());
                 full_file_name.push(file.name());
 
+                create_dir_all(&full_file_name.parent().unwrap())?;
+
                 writeln!(log, "Creating: {:?}", full_file_name).expect("failed to write to log");
                 let output = OpenOptions::new()
                     .read(true)
