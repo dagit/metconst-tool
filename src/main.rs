@@ -160,7 +160,7 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    for (idx, id) in hack_id.iter().enumerate().take(1) {
+    for (idx, id) in hack_id.iter().enumerate() {
         let hack_url = format!("{}hack.php?id={}", metconst, id);
         let hack_page = client.get(hack_url).send().await?.text().await?;
         let document = Html::parse_document(&hack_page);
@@ -183,7 +183,7 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
                                     println!("file_name: {}", file_name);
                                     let file_contents =
                                         client.get(url).send().await?.bytes().await?;
-                                    let dir_name = format!("{:04}-{}", idx, id);
+                                    let dir_name = format!("downloads/{:04}-{}", idx, id);
                                     println!("dir_name: {}", dir_name);
                                     create_dir_all(&dir_name)?;
                                     let file_name = format!("{}/{}", dir_name, file_name);
