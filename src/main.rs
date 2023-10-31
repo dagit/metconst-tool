@@ -119,11 +119,14 @@ fn unzip_in_dir(entry: DirEntry, log: &mut dyn Write) -> Result<(), Box<dyn std:
 
             for i in 0..zip.len() {
                 let mut file = zip.by_index(i)?;
+                if file.name().ends_with('/') {
+                    continue;
+                }
                 let mut full_file_name = PathBuf::new();
                 full_file_name.push(unpack_dir.clone());
                 full_file_name.push(file.name());
 
-                create_dir_all(&full_file_name.parent().unwrap())?;
+                create_dir_all(full_file_name.parent().unwrap())?;
 
                 writeln!(log, "Creating: {:?}", full_file_name).expect("failed to write to log");
                 let output = OpenOptions::new()
