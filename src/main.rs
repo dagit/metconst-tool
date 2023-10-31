@@ -195,13 +195,13 @@ async fn download() -> Result<(), Box<dyn std::error::Error>> {
                                     let file_name = format!("{}/{}", dir_name, file_name);
                                     let mut file = File::create(file_name)?;
                                     file.write_all(&file_contents)?;
+                                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                                 }
                             }
                         }
                     }
                 }
             }
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
     }
 
