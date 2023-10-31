@@ -13,17 +13,21 @@ use walkdir::{DirEntry, WalkDir};
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
-    #[arg(short, long)]
+    #[command(subcommand)]
     mode: RunMode,
-    #[arg(short, long)]
-    base_rom: Option<String>,
 }
 
-#[derive(clap::ValueEnum, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(clap::Subcommand, Debug, Clone, PartialEq, Eq)]
 enum RunMode {
     Download,
-    Patch,
+    Patch(PatchArgs),
     Unzip,
+}
+
+#[derive(clap::Args, Debug, Clone, PartialEq, Eq)]
+struct PatchArgs {
+    #[arg()]
+    base_rom: String,
 }
 
 #[tokio::main]
@@ -51,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut log_writer = BufWriter::new(&log);
             unzip_patches(&mut log_writer)?;
         }
-        RunMode::Patch => {
+        RunMode::Patch(pa) => {
             let log = OpenOptions::new()
                 .read(true)
                 .write(true)
@@ -59,13 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .truncate(true)
                 .open("patch.txt")?;
             let mut log_writer = BufWriter::new(&log);
-            if let Some(base_rom) = args.base_rom {
-                patch(&base_rom, &mut log_writer)?;
-            } else {
-                println!(
-                    "Must specify the base rom file to use for patching. Check --help output."
-                );
-            }
+            patch(&pa.base_rom, &mut log_writer)?;
         }
     }
 
