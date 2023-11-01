@@ -8,7 +8,10 @@ use scraper::{Html, Selector};
 use std::fs::{self, create_dir_all, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::path::PathBuf;
-use walkdir::{DirEntry, WalkDir};
+use walkdir::DirEntry;
+
+mod utils;
+use utils::*;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -31,74 +34,33 @@ struct PatchArgs {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> ResultErr<()> {
     let args = Args::parse();
 
     match args.mode {
         RunMode::Download => {
-            let log = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("download.txt")?;
-            let mut log_writer = BufWriter::new(&log);
+            let mut log_writer = open_log("download.txt")?;
             download(&mut log_writer).await?;
         }
         RunMode::Unzip => {
-            let log = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("unzip.txt")?;
-            let mut log_writer = BufWriter::new(&log);
-            unzip_patches(&mut log_writer)?;
+            let mut log_writer = open_log("unzip.txt")?;
+            process_directory(unzip_in_dir, "downloads", is_zip_file, &mut log_writer)?;
         }
         RunMode::Patch(pa) => {
-            let log = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("patch.txt")?;
-            let mut log_writer = BufWriter::new(&log);
-            patch(&pa.base_rom, &mut log_writer)?;
+            let mut log_writer = open_log("patch.txt")?;
+            process_directory(
+                |f, l| patch_in_dir(&pa.base_rom, f, l),
+                "downloads",
+                is_ips_file,
+                &mut log_writer,
+            )?;
         }
     }
 
     Ok(())
 }
 
-fn unzip_patches(log: &mut dyn Write) -> Result<(), Box<dyn std::error::Error>> {
-    for entry in WalkDir::new("downloads")
-        .into_iter()
-        .filter_entry(is_zip_file)
-    {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("Skipping directory due to error: {}", e);
-                writeln!(log, "Skipping directory due to error: {}", e)?;
-                continue;
-            }
-        };
-        //println!("{:?}", entry.path());
-        if entry.file_type().is_file() {
-            let result = unzip_in_dir(entry, log);
-            match result {
-                Ok(()) => (),
-                Err(e) => {
-                    eprintln!("Hit an error but continuing: {}", e);
-                    writeln!(log, "Hit an error but continuing: {}", e)?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn unzip_in_dir(entry: DirEntry, log: &mut dyn Write) -> Result<(), Box<dyn std::error::Error>> {
+fn unzip_in_dir(entry: DirEntry, log: &mut dyn Write) -> ResultErr<()> {
     writeln!(log, "Zip file: {:?}", entry.path()).expect("cannot write to log");
     let zip_file = File::open(entry.path())?;
     let zip_reader = BufReader::new(&zip_file);
@@ -141,53 +103,7 @@ fn unzip_in_dir(entry: DirEntry, log: &mut dyn Write) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-fn is_zip_file(entry: &DirEntry) -> bool {
-    entry.file_type().is_dir()
-        || entry
-            .file_name()
-            .to_str()
-            .map(|s| s.to_ascii_uppercase().ends_with(".ZIP"))
-            .unwrap_or(false)
-}
-
-fn is_ips_file(entry: &DirEntry) -> bool {
-    entry.file_type().is_dir()
-        || entry
-            .file_name()
-            .to_str()
-            .map(|s| s.to_ascii_uppercase().ends_with(".IPS"))
-            .unwrap_or(false)
-}
-
-fn patch(base_rom: &str, log: &mut dyn Write) -> Result<(), Box<dyn std::error::Error>> {
-    for entry in WalkDir::new(".").into_iter().filter_entry(is_ips_file) {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("Skipping directory due to error: {}", e);
-                writeln!(log, "Skipping directory due to error: {}", e)?;
-                continue;
-            }
-        };
-        if entry.file_type().is_file() {
-            let result = patch_in_dir(base_rom, entry, log);
-            match result {
-                Ok(()) => (),
-                Err(e) => {
-                    eprintln!("Hit an error but continuing: {}", e);
-                    writeln!(log, "Hit an error but continuing: {}", e)?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn patch_in_dir(
-    base_rom: &str,
-    entry: DirEntry,
-    log: &mut dyn Write,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn patch_in_dir(base_rom: &str, entry: DirEntry, log: &mut dyn Write) -> ResultErr<()> {
     let dir_path = entry.path().parent().ok_or("bad path")?;
     let mut rom_file = PathBuf::new();
     rom_file.push("patched");
@@ -236,7 +152,7 @@ fn patch_in_dir(
     Ok(())
 }
 
-async fn download(log: &mut dyn Write) -> Result<(), Box<dyn std::error::Error>> {
+async fn download(log: &mut dyn Write) -> ResultErr<()> {
     let retry_policy = ExponentialBackoff::builder().build_with_max_retries(10);
     let client = ClientBuilder::new(reqwest::ClientBuilder::new().user_agent("Foo").build()?)
         .with(RetryTransientMiddleware::new_with_policy(retry_policy))
