@@ -4,6 +4,7 @@ use ips::Patch;
 use regex::Regex;
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
+use sanitise_file_name::sanitise;
 use scraper::{Html, Selector};
 use std::fs::{self, create_dir_all, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
@@ -196,6 +197,28 @@ async fn download(log: &mut dyn Write) -> ResultErr<()> {
         let document = Html::parse_document(&hack_page);
         let download_link = format!(r"(^download\.php\?id={})", id);
         let re = Regex::new(&download_link)?;
+        let meta = Selector::parse("meta")?;
+        #[allow(non_snake_case)]
+        let underboxA = Selector::parse("td.underboxA")?;
+
+        // Extract hack title
+        // In an ideal world, we would always just use the meta property
+        // but for some reason, not all hack pages have that attribute set.
+        // So when we can't find the meta tag with "og:title" we fallback to
+        // looking for the hack title on the page
+        let mut title = None;
+        for element in document.select(&meta) {
+            if element.attr("property") == Some("og:title") {
+                title = element.attr("content");
+            }
+        }
+        if title.is_none() {
+            for element in document.select(&underboxA) {
+                title = element.text().next().map(|t| t.trim());
+            }
+        }
+        // No longer mutable
+        let title = title;
 
         for element in document.select(&ahref) {
             if let Some(href) = element.value().attr("href") {
@@ -204,13 +227,20 @@ async fn download(log: &mut dyn Write) -> ResultErr<()> {
                     let redirect_url = format!("{}{}", metconst, href);
                     let redirect_contents = client.get(redirect_url).send().await?.text().await?;
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                    let meta = Selector::parse("meta")?;
                     let document = Html::parse_document(&redirect_contents);
                     for element in document.select(&meta) {
                         if let Some(url) = element.value().attr("content") {
                             if let Some((_, url)) = url.rsplit_once('=') {
                                 if let Some((_, file_name)) = url.rsplit_once('/') {
-                                    let dir_name = format!("downloads/{:04}-{}", idx, id);
+                                    let dir_name;
+                                    if let Some(title) = title {
+                                        dir_name = format!(
+                                            "downloads/{}",
+                                            sanitise(&format!("{:04}-{}-{}", idx, id, title))
+                                        );
+                                    } else {
+                                        dir_name = format!("downloads/{:04}-{}", idx, id);
+                                    }
                                     let full_file_name = format!("{}/{}", dir_name, file_name);
                                     if std::path::Path::new(&full_file_name).exists() {
                                         //println!("skipping {}, already downloaded", url);
