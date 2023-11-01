@@ -213,7 +213,8 @@ async fn download(log: &mut dyn Write) -> ResultErr<()> {
             }
         }
         if title.is_none() {
-            for element in document.select(&underboxA) {
+            // We just want the first underboxA on the page
+            if let Some(element) = document.select(&underboxA).next() {
                 title = element.text().next().map(|t| t.trim());
             }
         }
