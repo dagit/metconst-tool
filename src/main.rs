@@ -26,6 +26,7 @@ enum RunMode {
     Download,
     Patch(PatchArgs),
     Unzip,
+    FileTypes,
 }
 
 #[derive(clap::Args, Debug, Clone, PartialEq, Eq)]
@@ -45,7 +46,12 @@ async fn main() -> ResultErr<()> {
         }
         RunMode::Unzip => {
             let mut log_writer = open_log("unzip.txt")?;
-            process_directory(unzip_in_dir, "downloads", is_zip_file, &mut log_writer)?;
+            process_directory(
+                unarchive_in_dir,
+                "downloads",
+                is_archive_file,
+                &mut log_writer,
+            )?;
         }
         RunMode::Patch(pa) => {
             let mut log_writer = open_log("patch.txt")?;
@@ -56,12 +62,84 @@ async fn main() -> ResultErr<()> {
                 &mut log_writer,
             )?;
         }
+        RunMode::FileTypes => {
+            use std::collections::HashSet;
+            let mut log_writer = open_log("filetypes.txt")?;
+            let mut extensions: HashSet<String> = HashSet::new();
+            process_directory(
+                |f, _| {
+                    let path = f.path();
+                    if let Some(ext) = path.extension() {
+                        extensions.insert(ext.to_string_lossy().to_string().to_lowercase());
+                    }
+                    Ok(())
+                },
+                "downloads",
+                |_| true,
+                &mut log_writer,
+            )?;
+            println!("extensions: {:?}", extensions);
+        }
     }
 
     Ok(())
 }
 
-fn unzip_in_dir(entry: DirEntry, log: &mut dyn Write) -> ResultErr<()> {
+fn unarchive_in_dir(entry: &DirEntry, log: &mut dyn Write) -> ResultErr<()> {
+    if is_zip_file(entry) {
+        unzip_in_dir(entry, log)?
+    } else if is_rar_file(entry) {
+        unrar_in_dir(entry, log)?
+    } else if is_7z_file(entry) {
+        un7z_in_dir(entry, log)?
+    }
+    Ok(())
+}
+
+fn un7z_in_dir(entry: &DirEntry, log: &mut dyn Write) -> ResultErr<()> {
+    writeln!(log, "7z file: {:?}", entry.path()).expect("cannot write to log");
+    if let Some(parent) = entry.path().parent() {
+        if let Some(archive_name) = entry.path().file_stem() {
+            let mut unpack_dir = PathBuf::new();
+            unpack_dir.push(parent);
+            unpack_dir.push(archive_name);
+            create_dir_all(&unpack_dir)?;
+            writeln!(log, "Creating: {:?}", unpack_dir).expect("failed to write to log");
+            sevenz_rust::decompress_file(entry.path(), unpack_dir)?;
+        }
+    }
+    Ok(())
+}
+
+fn unrar_in_dir(entry: &DirEntry, log: &mut dyn Write) -> ResultErr<()> {
+    writeln!(log, "Rar file: {:?}", entry.path()).expect("cannot write to log");
+    let mut archive = unrar::Archive::new(entry.path()).open_for_processing()?;
+    if let Some(parent) = entry.path().parent() {
+        if let Some(archive_name) = entry.path().file_stem() {
+            let mut unpack_dir = PathBuf::new();
+            unpack_dir.push(parent);
+            unpack_dir.push(archive_name);
+            while let Some(header) = archive.read_header()? {
+                archive = if header.entry().is_file() {
+                    let mut full_file_name = PathBuf::new();
+                    full_file_name.push(unpack_dir.clone());
+                    full_file_name.push(&header.entry().filename);
+
+                    create_dir_all(full_file_name.parent().unwrap())?;
+
+                    writeln!(log, "Creating: {:?}", full_file_name)
+                        .expect("failed to write to log");
+                    header.extract_with_base(full_file_name.parent().unwrap())?
+                } else {
+                    header.skip()?
+                };
+            }
+        }
+    }
+    Ok(())
+}
+
+fn unzip_in_dir(entry: &DirEntry, log: &mut dyn Write) -> ResultErr<()> {
     writeln!(log, "Zip file: {:?}", entry.path()).expect("cannot write to log");
     let zip_file = File::open(entry.path())?;
     let zip_reader = BufReader::new(&zip_file);
@@ -104,7 +182,7 @@ fn unzip_in_dir(entry: DirEntry, log: &mut dyn Write) -> ResultErr<()> {
     Ok(())
 }
 
-fn patch_in_dir(base_rom: &str, entry: DirEntry, log: &mut dyn Write) -> ResultErr<()> {
+fn patch_in_dir(base_rom: &str, entry: &DirEntry, log: &mut dyn Write) -> ResultErr<()> {
     let dir_path = entry.path().parent().ok_or("bad path")?;
     let mut rom_file = PathBuf::new();
     rom_file.push("patched");

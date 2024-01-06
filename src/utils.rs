@@ -24,6 +24,28 @@ pub fn is_zip_file(entry: &DirEntry) -> bool {
             .unwrap_or(false)
 }
 
+pub fn is_rar_file(entry: &DirEntry) -> bool {
+    entry.file_type().is_dir()
+        || entry
+            .file_name()
+            .to_str()
+            .map(|s| s.to_ascii_uppercase().ends_with(".RAR"))
+            .unwrap_or(false)
+}
+
+pub fn is_7z_file(entry: &DirEntry) -> bool {
+    entry.file_type().is_dir()
+        || entry
+            .file_name()
+            .to_str()
+            .map(|s| s.to_ascii_uppercase().ends_with(".7Z"))
+            .unwrap_or(false)
+}
+
+pub fn is_archive_file(entry: &DirEntry) -> bool {
+    is_zip_file(entry) || is_rar_file(entry) || is_7z_file(entry)
+}
+
 pub fn is_ips_file(entry: &DirEntry) -> bool {
     entry.file_type().is_dir()
         || entry
@@ -34,14 +56,14 @@ pub fn is_ips_file(entry: &DirEntry) -> bool {
 }
 
 pub fn process_directory<Action, Filter, Dir>(
-    action: Action,
+    mut action: Action,
     start_dir: Dir,
     filter: Filter,
     log: &mut dyn Write,
 ) -> ResultErr<()>
 where
     Filter: FnMut(&DirEntry) -> bool,
-    Action: Fn(DirEntry, &mut dyn Write) -> ResultErr<()>,
+    Action: FnMut(&DirEntry, &mut dyn Write) -> ResultErr<()>,
     Dir: AsRef<Path>,
 {
     for entry in WalkDir::new(start_dir).into_iter().filter_entry(filter) {
@@ -55,12 +77,21 @@ where
         };
         //println!("{:?}", entry.path());
         if entry.file_type().is_file() {
-            let result = action(entry, log);
+            let result = action(&entry, log);
             match result {
                 Ok(()) => (),
                 Err(e) => {
-                    eprintln!("Hit an error but continuing: {}", e);
-                    writeln!(log, "Hit an error but continuing: {}", e)?;
+                    eprintln!(
+                        "Hit an error on {}, but continuing: {}",
+                        entry.path().to_string_lossy(),
+                        e
+                    );
+                    writeln!(
+                        log,
+                        "Hit an error on {}, but continuing: {}",
+                        entry.path().to_string_lossy(),
+                        e
+                    )?;
                 }
             }
         }
