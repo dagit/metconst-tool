@@ -27,6 +27,7 @@ enum RunMode {
     Patch(PatchArgs),
     Unzip,
     FileTypes,
+    Metadata,
 }
 
 #[derive(clap::Args, Debug, Clone, PartialEq, Eq)]
@@ -79,6 +80,10 @@ async fn main() -> ResultErr<()> {
                 &mut log_writer,
             )?;
             println!("extensions: {:?}", extensions);
+        }
+        RunMode::Metadata => {
+            let mut log_writer = open_log("metadata.txt")?;
+            metadata(&mut log_writer).await?;
         }
     }
 
@@ -349,6 +354,141 @@ async fn download(log: &mut dyn Write) -> ResultErr<()> {
                 }
             }
         }
+        pb.inc(1);
+    }
+    pb.finish_with_message("done");
+
+    Ok(())
+}
+
+async fn metadata(_: &mut dyn Write) -> ResultErr<()> {
+    let retry_policy = ExponentialBackoff::builder().build_with_max_retries(10);
+    let client = ClientBuilder::new(reqwest::ClientBuilder::new().user_agent("Foo").build()?)
+        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+        .build();
+    let metconst = "https://metroidconstruction.com/";
+
+    // TODO: this will need to pull down mulitple pages once there are > 1000 hacks
+    let allhacks = format!("{}hacks.php?sort=5&dir=asc&filters%5B%5D=SM&filters%5B%5D=Unknown&filters%5B%5D=Boss+Rush&filters%5B%5D=Exploration&filters%5B%5D=Challenge&filters%5B%5D=Spoof&filters%5B%5D=Speedrun%2FRace&filters%5B%5D=Incomplete&filters%5B%5D=Quick+Play&filters%5B%5D=Improvement&filters%5B%5D=Vanilla%2B&search=&num_per_page=1000", metconst);
+
+    println!("Fetching list of hacks...");
+    let body = client.get(allhacks).send().await?.text().await?;
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    let document = Html::parse_document(&body);
+    let row_selector = Selector::parse("td")?;
+    let ahref = Selector::parse("a")?;
+
+    // example: hack.php?id=756
+    let re = Regex::new(r"^hack\.php\?id=([0-9]+)$")?;
+
+    let mut hack_id = Vec::new();
+    for element in document.select(&row_selector) {
+        for e in element.select(&ahref) {
+            if let Some(href) = e.value().attr("href") {
+                for (_, [id]) in re.captures_iter(href).map(|c| c.extract()) {
+                    hack_id.push(id);
+                }
+            }
+        }
+    }
+    println!("There are a total of {} hacks available.", hack_id.len());
+
+    let pb = ProgressBar::new(hack_id.len() as u64);
+
+    // Release date:
+    let release_date_re = Regex::new(r"<b>Release date:</b>(.*)")?;
+    // Author:
+    let author_re = Regex::new("<b>Author:</b> <a href=\".*\">(.*)</a>")?;
+    // Genre:
+    let genre_re = Regex::new("<b>Genre:</b> (.*) <")?;
+    // Difficulty:
+    let difficulty_re = Regex::new("<b>Difficulty:</b> (.*) <")?;
+    let mut csv_writer = open_log("metadata.csv")?;
+    let rating_re = Regex::new("Average Rating: ([0-9]+.[0-9]+) chozo orbs")?;
+    writeln!(
+        csv_writer,
+        "title,date,author,genre,difficulty,avg runtime, avg collection, avg rating"
+    )?;
+    for (_, id) in hack_id.iter().enumerate() {
+        let hack_url = format!("{}hack.php?id={}", metconst, id);
+        let hack_page = client.get(hack_url).send().await?.text().await?;
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        let document = Html::parse_document(&hack_page);
+        let meta = Selector::parse("meta")?;
+        #[allow(non_snake_case)]
+        let underboxA = Selector::parse("td.underboxA")?;
+        #[allow(non_snake_case)]
+        let underboxD = Selector::parse(".underboxD")?;
+
+        // Extract hack title
+        // In an ideal world, we would always just use the meta property
+        // but for some reason, not all hack pages have that attribute set.
+        // So when we can't find the meta tag with "og:title" we fallback to
+        // looking for the hack title on the page
+        let mut title = None;
+        for element in document.select(&meta) {
+            if element.attr("property") == Some("og:title") {
+                title = element.attr("content");
+            }
+        }
+        if title.is_none() {
+            // We just want the first underboxA on the page
+            if let Some(element) = document.select(&underboxA).next() {
+                title = element.text().next().map(|t| t.trim());
+            }
+        }
+        // No longer mutable
+        let title = title;
+
+        let mut date: String = String::new();
+        let mut author: String = String::new();
+        let mut genre = String::new();
+        let mut difficulty = String::new();
+        for element in document.select(&underboxD) {
+            let text = element.inner_html();
+            for (_, [d]) in release_date_re.captures_iter(&text).map(|c| c.extract()) {
+                date = d.trim().to_owned();
+            }
+            for (_, [a]) in author_re.captures_iter(&text).map(|c| c.extract()) {
+                author = a.trim().to_owned();
+            }
+            for (_, [g]) in genre_re.captures_iter(&text).map(|c| c.extract()) {
+                genre = g.trim().to_owned();
+            }
+            for (_, [d]) in difficulty_re.captures_iter(&text).map(|c| c.extract()) {
+                difficulty = d.trim().to_owned();
+            }
+        }
+        let mut runtime = String::new();
+        let avg_runtime = Selector::parse("#average_runtime")?;
+        for element in document.select(&avg_runtime) {
+            runtime = element.inner_html();
+        }
+        let mut collection = String::new();
+        let avg_collection = Selector::parse("#average_completion")?;
+        for element in document.select(&avg_collection) {
+            collection = element.inner_html();
+        }
+        let mut rating = String::new();
+        let avg_rating = Selector::parse("span[title]")?;
+        for element in document.select(&avg_rating) {
+            let text = element.inner_html();
+            for (_, [d]) in rating_re.captures_iter(&text).map(|c| c.extract()) {
+                rating = d.trim().to_owned();
+            }
+        }
+        writeln!(
+            csv_writer,
+            "\"{}\",\"{}\",{},{},{},{},{},{}",
+            title.unwrap_or(""),
+            date,
+            author,
+            genre,
+            difficulty,
+            runtime,
+            collection,
+            rating,
+        )?;
         pb.inc(1);
     }
     pb.finish_with_message("done");
