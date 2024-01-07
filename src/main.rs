@@ -407,9 +407,19 @@ async fn metadata(_: &mut dyn Write) -> ResultErr<()> {
     let rating_re = Regex::new("Average Rating: ([0-9]+.[0-9]+) chozo orbs")?;
     writeln!(
         csv_writer,
-        "title,date,author,genre,difficulty,avg runtime, avg collection, avg rating"
+        "title,date,author,genre,difficulty,avg runtime,avg collection,avg rating,by pedro"
     )?;
-    for (_, id) in hack_id.iter().enumerate() {
+    let mut pedro_aliases = vec![
+        "crimsonsunbird".to_owned(),
+        "Juan Dennys".to_owned(),
+        "pedro123".to_owned(),
+        "jailsonmendes".to_owned(),
+        "FaiskaBr".to_owned(),
+    ];
+    pedro_aliases
+        .iter_mut()
+        .for_each(|s| s.make_ascii_lowercase());
+    for id in hack_id.iter() {
         let hack_url = format!("{}hack.php?id={}", metconst, id);
         let hack_page = client.get(hack_url).send().await?.text().await?;
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -477,9 +487,14 @@ async fn metadata(_: &mut dyn Write) -> ResultErr<()> {
                 rating = d.trim().to_owned();
             }
         }
+        let by_pedro = if pedro_aliases.contains(&author.to_ascii_lowercase()) {
+            "Y"
+        } else {
+            "N"
+        };
         writeln!(
             csv_writer,
-            "\"{}\",\"{}\",{},{},{},{},{},{}",
+            "\"{}\",\"{}\",\"{}\",{},{},{},{},{},{}",
             title.unwrap_or(""),
             date,
             author,
@@ -488,6 +503,7 @@ async fn metadata(_: &mut dyn Write) -> ResultErr<()> {
             runtime,
             collection,
             rating,
+            by_pedro,
         )?;
         pb.inc(1);
     }
